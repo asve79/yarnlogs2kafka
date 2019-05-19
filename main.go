@@ -2,14 +2,22 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 
 	"github.com/Shopify/sarama"
 )
+
+//TODO: Добавить полей application_id и user_if
+type Msg struct {
+	Source  string `json:"source"`
+	Message string `json:"message"`
+}
 
 func main() {
 	topic := flag.String("topic", "test-file-send", "Topic")
@@ -51,15 +59,39 @@ func readFile(filename string, producer sarama.SyncProducer, topic string, delet
 	}
 	defer file.Close()
 
+	var accmsg string
+
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Println("Sending: " + line)
-		msg := prepareMessage(topic, line)
 
-		_, _, err := producer.SendMessage(msg)
-		if err != nil {
-			panic(err)
+		//TODO: Поставить корректный формат даты/Вреиени
+		commit, _ := regexp.MatchString(`^[\d+].[\d+].[\d+].[\d+].[\d+].[\d+].*`, line)
+
+		if commit {
+			//TODO: Тоже поставить корректный формат даты\времени
+			reliable, _ := regexp.MatchString(`^[\d+].[\d+].[\d+].[\d+].[\d+].[\d+].*`, accmsg)
+
+			if !reliable { //Gропустить если мусор
+				fmt.Println("Not reliable. Skip.")
+			} else {
+				msgMarshalled, err := json.Marshal(Msg{Source: filename, Message: accmsg})
+				if err != nil {
+					fmt.Println("Bat string ", err.Error())
+					continue
+				}
+				fmt.Println("Sending: " + string(msgMarshalled))
+				msg := prepareMessage(topic, string(msgMarshalled))
+
+				_, _, err = producer.SendMessage(msg)
+				if err != nil {
+					panic(err)
+				}
+				accmsg = ""
+				continue
+			}
+		} else {
+			accmsg = accmsg + line
 		}
 
 	}
